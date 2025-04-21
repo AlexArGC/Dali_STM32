@@ -1,0 +1,11 @@
+{
+    "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
+    "files.associations": {
+        "*.env-example": "dotenv",
+        ".env*": "dotenv",
+        "*.ipp": "cpp",
+        "atomic": "cpp",
+        "stdint.h": "c",
+        "stm32f0xx_hal_i2c.h": "c"
+    }
+}
