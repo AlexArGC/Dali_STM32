@@ -18,6 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "dma.h"
+#include "usart.h"
+#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -31,7 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define RX_BUFFER_SIZE 10
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -40,15 +43,13 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-UART_HandleTypeDef huart1;
-
 /* USER CODE BEGIN PV */
-
+uint8_t rxBuffer[RX_BUFFER_SIZE];
+volatile uint8_t dataReceived = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -59,9 +60,9 @@ static void MX_GPIO_Init(void);
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
 
@@ -87,9 +88,24 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   const char *str_tx = "hello ";
+  memset(rxBuffer, 0, RX_BUFFER_SIZE);
+
+  // Сброс флагов ошибок UART перед началом работы
+  __HAL_UART_CLEAR_OREFLAG(&huart1);
+  __HAL_UART_CLEAR_FEFLAG(&huart1);
+  __HAL_UART_CLEAR_NEFLAG(&huart1);
+  __HAL_UART_CLEAR_PEFLAG(&huart1);
+
+  if (HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rxBuffer, RX_BUFFER_SIZE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  // Отключаем Half‑Transfer Interrupt (HT), чтобы игнорировать событие заполнения половины буфера
+  __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -99,20 +115,23 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    /* передаём строку */
     if (HAL_UART_Transmit(&huart1, (uint8_t *)str_tx, strlen(str_tx), 100) != HAL_OK)
     {
-      // Обработка ошибки, например, индикация или вызов
+      /* ошибка при передаче */
       Error_Handler();
     }
-    HAL_Delay(1000);
+
+    /* пауза 1 секунду перед следующей отправкой */
+    HAL_Delay(2000);
   }
   /* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -120,25 +139,28 @@ void SystemClock_Config(void)
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+   * in the RCC_OscInitTypeDef structure.
+   */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL12;
+  RCC_OscInitStruct.PLL.PREDIV = RCC_PREDIV_DIV1;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -150,71 +172,64 @@ void SystemClock_Config(void)
   }
 }
 
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-void MX_USART1_UART_Init(void)
+/* USER CODE BEGIN 4 */
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
+  if (huart->Instance == USART1)
+  {
+    dataReceived = 1;
+    HAL_UART_Transmit(&huart1, rxBuffer, size, 200);
 
-  /* USER CODE BEGIN USART1_Init 0 */
+    // Перезапуск приёма
+    if (HAL_UARTEx_ReceiveToIdle_DMA(huart, rxBuffer, RX_BUFFER_SIZE) != HAL_OK)
+    {
+      // Если не удалось запустить приём — обработать ошибку
+      Error_Handler();
+    }
+    // Снова отключаем прерывание HT
+    __HAL_DMA_DISABLE_IT(huart->hdmarx, DMA_IT_HT);
+  }
+}
 
-  /* USER CODE END USART1_Init 0 */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->ErrorCode & HAL_UART_ERROR_ORE)
+  {
+    // Абортируем DMA-приём — аппаратно выключаем канал, чтобы он не успел записать следующий байт
+    if (HAL_DMA_Abort(huart->hdmarx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    // Дожидаемся, пока DMA действительно станет READY
+    while (huart->hdmarx->State != HAL_DMA_STATE_READY)
+    { /* wait */
+    }
 
-  /* USER CODE BEGIN USART1_Init 1 */
+    // «Выгружаем» лишний байт из DR: читаем ISR и затем RDR
+    __IO uint32_t tmp;
+    tmp = huart->Instance->ISR;
+    tmp = huart->Instance->RDR;
+    (void)tmp;
 
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 1200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_8;
-  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_ENABLE;
-  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_TXINVERT_INIT|UART_ADVFEATURE_RXINVERT_INIT
-                              |UART_ADVFEATURE_DATAINVERT_INIT;
-  huart1.AdvancedInit.TxPinLevelInvert = UART_ADVFEATURE_TXINV_ENABLE;
-  huart1.AdvancedInit.RxPinLevelInvert = UART_ADVFEATURE_RXINV_ENABLE;
-  huart1.AdvancedInit.DataInvert = UART_ADVFEATURE_DATAINV_ENABLE;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
+    // Сбрасываем флаг переполнения
+    __HAL_UART_CLEAR_OREFLAG(huart);
+  }
+
+  // Перезапускаем приём по DMA
+  if (HAL_UARTEx_ReceiveToIdle_DMA(huart, rxBuffer, RX_BUFFER_SIZE) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
+  // По-прежнему отключаем Half-Transfer interrupt
+  __HAL_DMA_DISABLE_IT(huart->hdmarx, DMA_IT_HT);
 }
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOF_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
-}
-
-/* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -227,14 +242,14 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

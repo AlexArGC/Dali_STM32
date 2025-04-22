@@ -6,6 +6,8 @@
         "*.ipp": "cpp",
         "atomic": "cpp",
         "stdint.h": "c",
-        "stm32f0xx_hal_i2c.h": "c"
+        "stm32f0xx_hal_i2c.h": "c",
+        "dma.h": "c",
+        "stm32f0xx_hal.h": "c"
     }
 }

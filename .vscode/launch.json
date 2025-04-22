@@ -4,16 +4,23 @@
     // Для получения дополнительной информации посетите: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
         {
-            "cwd": "${workspaceFolder}",
-            "executable": "./build/Dali_STM32.elf",
-            "name": "Debug with ST-Link",
-            "request": "launch",
+            "name": "Cortex Debug (OpenOCD)",
             "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "gdbPath": "arm-none-eabi-gdb",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Dali_STM32.elf",
+            "configFiles": [
+                "interface/stlink-v2.cfg",
+                "target/stm32f0x.cfg"
+            ],
             "runToEntryPoint": "main",
+            "preLaunchTask": "pre-debug",
+            "device": "STM32F030x4",
+            "svdFile": "${workspaceFolder}/STM32F0x0.svd",
             "showDevDebugOutput": "none",
-            "servertype": "stlink"
         }
     ]
 }
